@@ -1,0 +1,109 @@
+import argparse
+import json
+import socket
+import traceback
+
+def compute_turn_moves(state, rules, team):
+    """
+    Calcule les déplacements (phase de mouvement).
+    """
+    moves = []
+    # TODO: Logique de déplacement (Pathfinding, A*, etc.)
+    return moves
+
+def compute_turn_actions(state, rules, team):
+    """
+    Calcule les actions (phase d'action) selon l'architecture Utility AI.
+    """
+    # 1. Analyseur d'État (Macro)
+    # TODO: Extraire métriques (menaces, coût viande, PV château, ratio militaire)
+    
+    # 2. Machine à États (Multiplicateurs)
+    # TODO: Déterminer l'état (Développement, Guerre Éco, Défense, Réparation, Assaut)
+    
+    # 3. Scoring Dynamique (Micro)
+    # TODO: Générer et évaluer les actions pour chaque unité (Focus Fire inclus)
+    
+    actions = []
+    
+    # IMPORTANT: Trier les actions (deposit > recruit/repair > autres)
+    # Les ordres sont traités dans l'ordre de la liste.
+    # actions.sort(key=lambda a: sorting_logic(a))
+    
+    return actions
+
+def play(game_id, name, host, port, wanted_team=None):
+    print(f"Connexion au serveur {host}:{port} pour la partie {game_id}...")
+    with socket.create_connection((host, port)) as sock:
+        # Utilisation de makefile pour simplifier la lecture ligne par ligne
+        stream = sock.makefile("rw", encoding="utf-8", newline="\n")
+
+        def send(message):
+            stream.write(json.dumps(message) + "\n")
+            stream.flush()
+
+        def safe_call(function, *arguments):
+            # Rattraper les exceptions pour ne pas se déconnecter et perdre la partie
+            try:
+                orders = function(*arguments)
+                return orders if isinstance(orders, list) else []
+            except Exception:
+                traceback.print_exc()
+                return []
+
+        # Rejoindre la partie
+        join = {"type": "join", "game_id": game_id, "name": name}
+        if wanted_team:
+            join["team"] = wanted_team
+        send(join)
+
+        team, rules = None, None
+        
+        # Boucle principale de réception des messages
+        for line in stream:
+            if not line.strip():
+                continue
+                
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            msg_type = message.get("type")
+            
+            if msg_type == "joined":
+                team = message["team"]
+                print(f"Rejoint avec succès ! Équipe: {team}")
+            
+            elif msg_type == "game_start":
+                rules = message["rules"]
+                print("Partie commencée ! Règles reçues.")
+            
+            elif msg_type == "new_turn":
+                # Phase de déplacements
+                moves = safe_call(compute_turn_moves, message["state"], rules, team)
+                send({"type": "moves", "turn": message["turn"], "moves": moves})
+            
+            elif msg_type == "action":
+                # Phase d'actions
+                actions = safe_call(compute_turn_actions, message["state"], rules, team)
+                send({"type": "actions", "turn": message["turn"], "actions": actions})
+            
+            elif msg_type == "game_over":
+                print(f"Partie terminée. Vainqueur: {message.get('winner')}, Raison: {message.get('reason')}")
+                break
+            
+            elif msg_type == "error":
+                print(f"[ERREUR SERVEUR] {message.get('message')}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Bot IA - Hackathon")
+    parser.add_argument("game_id", help="ID de la partie")
+    parser.add_argument("--name", default="AntiGravityBot")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=5555)
+    parser.add_argument("--team", choices=("purple", "yellow"), default=None,
+                        help="Équipe souhaitée")
+    args = parser.parse_args()
+    
+    play(args.game_id, args.name, args.host, args.port, args.team)
