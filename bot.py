@@ -3,34 +3,37 @@ import json
 import socket
 import traceback
 
+import pathfinding
+import macro
+import micro
+import economy
+
+is_map_initialized = False
+
 def compute_turn_moves(state, rules, team):
-    """
-    Calcule les déplacements (phase de mouvement).
-    """
-    moves = []
-    # TODO: Logique de déplacement (Pathfinding, A*, etc.)
-    return moves
+    global is_map_initialized
+    if not is_map_initialized:
+        pathfinding.init_map(state, rules)
+        is_map_initialized = True
+        
+    return pathfinding.get_moves(state, rules, team)
 
 def compute_turn_actions(state, rules, team):
-    """
-    Calcule les actions (phase d'action) selon l'architecture Utility AI.
-    """
-    # 1. Analyseur d'État (Macro)
-    # TODO: Extraire métriques (menaces, coût viande, PV château, ratio militaire)
+    # 1. Macro
+    macro_state = macro.analyze_state(state, rules, team)
+    multipliers = macro.get_multipliers(macro_state)
     
-    # 2. Machine à États (Multiplicateurs)
-    # TODO: Déterminer l'état (Développement, Guerre Éco, Défense, Réparation, Assaut)
+    # 2. Micro (Troupes)
+    unit_actions = micro.generate_and_score_actions(state, rules, team, multipliers)
     
-    # 3. Scoring Dynamique (Micro)
-    # TODO: Générer et évaluer les actions pour chaque unité (Focus Fire inclus)
+    # 3. Economy (Château)
+    eco_actions = economy.get_economy_actions(state, rules, team, macro_state)
     
-    actions = []
+    # Fusion et Tri
+    all_actions = unit_actions + eco_actions
+    final_actions = economy.sort_actions(all_actions)
     
-    # IMPORTANT: Trier les actions (deposit > recruit/repair > autres)
-    # Les ordres sont traités dans l'ordre de la liste.
-    # actions.sort(key=lambda a: sorting_logic(a))
-    
-    return actions
+    return final_actions
 
 def play(game_id, name, host, port, wanted_team=None):
     print(f"Connexion au serveur {host}:{port} pour la partie {game_id}...")
