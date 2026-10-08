@@ -19,6 +19,17 @@ def compute_turn_moves(state, rules, team):
     return pathfinding.get_moves(state, rules, team)
 
 def compute_turn_actions(state, rules, team):
+    global previous_macro_state
+    # 1. Macro : conserver la strategie pour stabiliser les transitions.
+    macro_state = macro.analyze_state(
+        state, rules, team, previous_state=previous_macro_state
+    )
+    previous_macro_state = macro_state
+    multipliers = macro.get_multipliers(macro_state)
+    
+    # 2. Machine à États (Multiplicateurs)
+    # TODO: Déterminer l'état (Développement, Guerre Éco, Défense, Réparation, Assaut)
+
     # 1. Macro
     macro_state = macro.analyze_state(state, rules, team)
     multipliers = macro.get_multipliers(macro_state)
@@ -36,6 +47,8 @@ def compute_turn_actions(state, rules, team):
     return final_actions
 
 def play(game_id, name, host, port, wanted_team=None):
+    global previous_macro_state
+    previous_macro_state = None
     print(f"Connexion au serveur {host}:{port} pour la partie {game_id}...")
     with socket.create_connection((host, port)) as sock:
         # Utilisation de makefile pour simplifier la lecture ligne par ligne
