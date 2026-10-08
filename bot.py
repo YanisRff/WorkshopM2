@@ -3,6 +3,17 @@ import json
 import socket
 import traceback
 
+<<<<<<< Updated upstream
+=======
+import pathfinding
+import macro
+import micro
+import economy
+
+is_map_initialized = False
+previous_macro_state = None
+
+>>>>>>> Stashed changes
 def compute_turn_moves(state, rules, team):
     """
     Calcule les déplacements (phase de mouvement).
@@ -12,11 +23,21 @@ def compute_turn_moves(state, rules, team):
     return moves
 
 def compute_turn_actions(state, rules, team):
+<<<<<<< Updated upstream
     """
     Calcule les actions (phase d'action) selon l'architecture Utility AI.
     """
     # 1. Analyseur d'État (Macro)
     # TODO: Extraire métriques (menaces, coût viande, PV château, ratio militaire)
+=======
+    global previous_macro_state
+    # 1. Macro : conserver la strategie pour stabiliser les transitions.
+    macro_state = macro.analyze_state(
+        state, rules, team, previous_state=previous_macro_state
+    )
+    previous_macro_state = macro_state
+    multipliers = macro.get_multipliers(macro_state)
+>>>>>>> Stashed changes
     
     # 2. Machine à États (Multiplicateurs)
     # TODO: Déterminer l'état (Développement, Guerre Éco, Défense, Réparation, Assaut)
@@ -33,6 +54,8 @@ def compute_turn_actions(state, rules, team):
     return actions
 
 def play(game_id, name, host, port, wanted_team=None):
+    global previous_macro_state
+    previous_macro_state = None
     print(f"Connexion au serveur {host}:{port} pour la partie {game_id}...")
     with socket.create_connection((host, port)) as sock:
         # Utilisation de makefile pour simplifier la lecture ligne par ligne
