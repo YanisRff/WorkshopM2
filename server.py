@@ -25,7 +25,9 @@ from pathlib import Path
 from map_generator import generate_map
 
 TEAMS = ("purple", "yellow")
-ROBOT_SCRIPT = Path(__file__).resolve().parent.parent / "clients" / "robot_bot.py"
+ROBOT_SCRIPT = Path(__file__).resolve().parent / "robot_bot.py"
+if not ROBOT_SCRIPT.exists():
+    ROBOT_SCRIPT = Path(__file__).resolve().parent.parent / "clients" / "robot_bot.py"
 ID_ALPHABET = string.ascii_uppercase + string.digits
 LINE_LIMIT = 16 * 1024 * 1024  # Les etats complets depassent la limite par defaut (64 Ko).
 

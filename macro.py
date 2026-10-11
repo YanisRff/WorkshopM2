@@ -78,6 +78,7 @@ class Metrics:
     local_military_ratio: float
     immediate_enemy_damage: float
     threatened: bool
+    turn: int = 1
 
 
 def get_chebyshev_distance(a: Mapping, b: Mapping) -> int:
@@ -150,7 +151,7 @@ def extract_metrics(
         if unit["team"] == team:
             own_damage += damage
             pawns += unit["type"] == "pawn"
-            military_count += unit["type"] != "pawn" and damage > 0
+            military_count += unit["type"] != "pawn"
             if distance <= radius:
                 nearby_own += damage
             continue
@@ -187,6 +188,7 @@ def extract_metrics(
         local_military_ratio=_ratio(nearby_own, nearby_enemy),
         immediate_enemy_damage=immediate,
         threatened=threatened,
+        turn=int(state.get("turn", 1)),
     )
 
 
@@ -197,6 +199,7 @@ def choose_state(
 ) -> str:
     cfg = config or MacroConfig()
     m = metrics
+    # 1. Menace directe ou imminente sur le château : défense d'urgence absolue
     if m.threatened:
         if (
             m.immediate_enemy_damage > 0
@@ -205,19 +208,35 @@ def choose_state(
             or m.local_military_ratio < cfg.minimum_local_ratio
         ):
             return "DEFENSE_URGENTE"
-        return "DEFENSE"
 
+    # 2. Besoins élémentaires de début de partie
     if m.pawn_count < cfg.target_pawns or m.own_damage == 0:
         return "ECO_FOCUS"
 
+    # 3. Évaluation de l'Assaut (contre-attaque ou supériorité militaire)
     assault_threshold = (
         cfg.assault_keep_ratio if previous_state == "ASSAUT"
         else cfg.assault_ratio
     )
+    # Escalade agressive au fil des tours pour forcer la décision et éliminer les nuls (timeout)
+    if m.turn > 200:
+        assault_threshold = min(assault_threshold, 0.8)
+    elif m.turn > 150:
+        assault_threshold = min(assault_threshold, 1.0)
+    elif m.turn > 100:
+        assault_threshold = min(assault_threshold, 1.1)
+    elif m.turn > 70:
+        assault_threshold = min(assault_threshold, 1.25)
+
     if (m.military_count >= cfg.minimum_military_units
             and m.military_ratio >= assault_threshold):
         return "ASSAUT"
-    if m.meat < m.next_meat_cost:
+
+    # 4. Défense standard si un ennemi est dans notre zone sans danger critique
+    if m.threatened:
+        return "DEFENSE"
+
+    if m.meat < m.next_meat_cost and m.military_count == 0:
         return "ECO_FOCUS"
     return "EQUILIBRE"
 

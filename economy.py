@@ -20,13 +20,25 @@ def get_virtual_bank(current_gold, current_meat, current_wood, planned_actions, 
     
     for action in planned_actions:
         if action.get("type") == "deposit":
-            unit_id = action.get("unit_id")
+            unit_id = action.get("unit", action.get("unit_id"))
             unit = team_units.get(unit_id)
-            if unit and 'inventory' in unit:
-                # Structure supposée : unit['inventory'] = {'gold': X, 'meat': Y, 'wood': Z}
-                v_gold += unit['inventory'].get('gold', 0)
-                v_meat += unit['inventory'].get('meat', 0)
-                v_wood += unit['inventory'].get('wood', 0)
+            if unit:
+                # Structure réelle du protocole : unit['carrying'] = {'resource': 'gold', 'amount': 5}
+                carrying = unit.get("carrying")
+                if carrying and isinstance(carrying, dict):
+                    res = carrying.get("resource")
+                    amt = carrying.get("amount", 0)
+                    if res == "gold":
+                        v_gold += amt
+                    elif res == "meat":
+                        v_meat += amt
+                    elif res == "wood":
+                        v_wood += amt
+                # Structure mockée pour compatibilité avec test_economy.py
+                elif "inventory" in unit and isinstance(unit["inventory"], dict):
+                    v_gold += unit["inventory"].get("gold", 0)
+                    v_meat += unit["inventory"].get("meat", 0)
+                    v_wood += unit["inventory"].get("wood", 0)
                 
     return v_gold, v_meat, v_wood
 
@@ -76,3 +88,83 @@ def sort_actions_for_server(actions_list):
             return 2
 
     return sorted(actions_list, key=get_action_priority)
+
+# Alias pour compatibilité avec bot.py
+sort_actions = sort_actions_for_server
+
+def get_economy_actions(state, rules, team, macro_state, planned_actions=None):
+    """
+    Génère les actions économiques du château (recruit et repair) selon l'état macro.
+    Retourne une liste d'actions au format attendu par le serveur.
+    """
+    castle = next((b for b in state.get("buildings", []) if b["team"] == team and b["type"] == "castle"), None)
+    if not castle or castle.get("hp", 0) <= 0:
+        return []
+
+    team_data = state["teams"][team]
+    bank = team_data["resources"]
+    gold = bank["gold"]
+    meat = bank["meat"]
+    wood = bank["wood"]
+    next_meat_cost = team_data["next_meat_cost"]
+
+    # Si des actions de dépôt sont prévues, calculer la banque virtuelle
+    if planned_actions:
+        team_units = {u["id"]: u for u in state["units"] if u["team"] == team}
+        gold, meat, wood = get_virtual_bank(gold, meat, wood, planned_actions, team_units)
+
+    castle_hp = castle["hp"]
+    castle_max_hp = castle["max_hp"]
+    actions = []
+
+    # 1. Réparation (Zéro gaspillage : uniquement sur le stock réel en banque)
+    real_wood = bank.get("wood", 0)
+    missing_hp = castle_max_hp - castle_hp
+    if real_wood > 0 and real_wood <= missing_hp:
+        actions.append({"type": "repair", "building": castle["id"]})
+
+    # 2. Recrutement
+    my_units = [u for u in state.get("units", []) if u["team"] == team]
+    unit_count = len(my_units)
+    max_units = rules.get("max_units", 40) if rules else 40
+
+    if unit_count < max_units:
+        pawn_count = sum(1 for u in my_units if u["type"] == "pawn")
+        lancer_count = sum(1 for u in my_units if u["type"] == "lancer")
+        monk_count = sum(1 for u in my_units if u["type"] == "monk")
+        target_unit = None
+
+        if pawn_count < 3:
+            target_unit = "pawn"
+        elif macro_state == "DEFENSE_URGENTE":
+            # Urgence absolue : si on ne peut pas payer un Lancier, prendre un Guerrier pour faire barrage
+            if lancer_count >= 2 and monk_count == 0 and gold >= 15 and meat >= next_meat_cost:
+                target_unit = "monk"
+            elif gold >= 10 and meat >= next_meat_cost:
+                target_unit = "lancer"
+            elif gold >= 5 and meat >= next_meat_cost:
+                target_unit = "warrior"
+            elif pawn_count < 5 and gold >= 1 and meat >= next_meat_cost:
+                target_unit = "pawn"
+        elif pawn_count < 5:
+            # 5 pions pour un flux optimal : 2 sur l'or (10/voyage), 3 sur la viande (15/voyage)
+            target_unit = "pawn"
+        else:
+            # Composition d'élite (Lanciers 90 PV + Moines soigneurs) : pas de dilution avec des guerriers fragiles
+            want_monk = (lancer_count >= 2 and monk_count == 0) or (lancer_count >= 5 and monk_count < 2)
+            if want_monk:
+                target_unit = "monk"
+            else:
+                target_unit = "lancer"
+
+        # Coût en or
+        if target_unit:
+            unit_cost = UNIT_GOLD_COSTS.get(target_unit.capitalize(), 1)
+            if gold >= unit_cost and meat >= next_meat_cost:
+                actions.append({
+                    "type": "recruit",
+                    "building": castle["id"],
+                    "unit_type": target_unit
+                })
+
+    return actions
