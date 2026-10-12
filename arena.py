@@ -50,7 +50,7 @@ def main():
     num_matches = args.num_matches
 
     os.makedirs("logs", exist_ok=True)
-    godot_binary = "./cours-isen-linux/cours-isen.x86_64"
+    godot_binary = "./cours-isen.exe"
     ensure_executable(godot_binary)
     ensure_executable("./cours-isen-linux/cours-isen.sh")
 
@@ -135,7 +135,7 @@ def main():
 
         # Lancer le bot Yellow
         bot_yellow = subprocess.Popen(
-            [sys.executable, "-u", "bot.py", game_id, "--team", "yellow", "--name", name_yellow, "--log-file", log_yellow],
+            [sys.executable, "-u", "bots/bot1/bot.py", game_id, "--team", "yellow", "--name", name_yellow, "--log-file", log_yellow],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

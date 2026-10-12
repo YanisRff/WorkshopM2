@@ -15,7 +15,7 @@ def ensure_executable(path):
 
 def main():
     os.makedirs("logs", exist_ok=True)
-    godot_binary = "./cours-isen-linux/cours-isen.x86_64"
+    godot_binary = "./cours-isen.exe"
     ensure_executable(godot_binary)
 
     # Démarrage du serveur Python avec -u (unbuffered)
