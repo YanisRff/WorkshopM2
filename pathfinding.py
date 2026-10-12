@@ -444,8 +444,235 @@ def expected_income(steps: int, move: int = 4, capacity: int = 5) -> float:
 
 
 # ============================================================================
-# Test rapide : `python map_utils.py`
+# 7. Interface du bot (init_map et get_moves)
 # ============================================================================
+
+def init_map(state: State, rules: Rules) -> None:
+    """Initialise le cache de la carte et des ressources."""
+    global _RES_CACHE
+    _RES_CACHE.clear()
+
+
+def get_moves(state: State, rules: Rules, team: str) -> List[Dict[str, Any]]:
+    """
+    Calcule tous les déplacements du tour pour les unités de notre camp.
+    Gère les collisions locales en mettant à jour 'occupied' au fil de l'eau.
+    """
+    import macro
+
+    castle = my_castle(state, team)
+    e_castle = enemy_castle(state, team)
+    if not castle:
+        return []
+
+    # Positions occupées par toutes les unités et par les ennemis (bloquants)
+    occupied = set(unit_positions(state))
+    enemy_pos = set(unit_positions(state, enemy_of=team))
+
+    # Stratégie macro
+    macro_state = macro.analyze_state(state, rules, team)
+
+    # Champs de potentiel généraux
+    castle_cells = cells_within(state, castle, 1)
+    castle_deposit_field = goal_field(state, castle_cells) if castle_cells else {}
+
+    e_castle_field = {}
+    if e_castle:
+        e_cells = cells_within(state, e_castle, 1)
+        if e_cells:
+            e_castle_field = goal_field(state, e_cells)
+
+    # Ressources triées par proximité
+    gold_res = get_sorted_resources(state, team, "gold")
+    meat_res = get_sorted_resources(state, team, "meat")
+    wood_res = get_sorted_resources(state, team, "wood")
+
+    bank = state["teams"][team]["resources"]
+    next_meat = state["teams"][team]["next_meat_cost"]
+
+    moves: List[Dict[str, Any]] = []
+
+    # Règles par défaut si non fournies
+    default_moves = {"pawn": 4, "warrior": 3, "lancer": 2, "archer": 1, "monk": 1}
+    default_ranges = {"pawn": 1, "warrior": 1, "lancer": 2, "archer": 4, "monk": 2}
+    unit_stats = rules.get("units", {}) if rules else {}
+
+    # Séparer pions et militaires
+    all_my_units = my_units(state, team)
+    enemies = enemy_units(state, team)
+
+    for u in all_my_units:
+        if u.get("hp", 0) <= 0:
+            continue
+
+        u_id = u["id"]
+        u_type = u["type"]
+        pos = (u["x"], u["y"])
+        max_move = unit_stats.get(u_type, {}).get("move", default_moves.get(u_type, 1))
+        reach = unit_stats.get(u_type, {}).get("range", default_ranges.get(u_type, 1))
+
+        dest = pos
+
+        # --- Comportement des Pions (Pawn) ---
+        if u_type == "pawn":
+            carrying = u.get("carrying")
+            amount = carrying["amount"] if carrying else 0
+            res_type = carrying["resource"] if carrying else None
+
+            # Si plein ou presque plein, ou transportant des ressources près du château -> Déposer
+            dist_c = dist_to_rect(pos, castle)
+            should_deposit = (amount >= 5) or (amount > 0 and (dist_c <= 2 or macro_state == "DEFENSE_URGENTE"))
+
+            if should_deposit and castle_deposit_field:
+                dest = step_toward(state, u, max_move, castle_deposit_field, enemy_pos, occupied)
+            else:
+                # Choisir vers quel gisement se diriger
+                chosen_res = None
+                if amount > 0 and res_type:
+                    # Continuer la même ressource
+                    target_list = gold_res if res_type == "gold" else (meat_res if res_type == "meat" else wood_res)
+                    chosen_res = target_list[0] if target_list else None
+                else:
+                    # Choisir entre or, viande ou bois intelligemment
+                    my_pawns = [p for p in all_my_units if p["type"] == "pawn"]
+                    lancer_count = sum(1 for u in all_my_units if u["type"] == "lancer")
+                    monk_count = sum(1 for u in all_my_units if u["type"] == "monk")
+                    want_monk = (lancer_count >= 2 and monk_count == 0) or (lancer_count >= 5 and monk_count < 2)
+                    target_gold = 15 if want_monk else 10
+                    if len(my_pawns) < 4:
+                        target_gold = 1
+
+                    p_idx = 0
+                    for idx, p in enumerate(my_pawns):
+                        if p["id"] == u_id:
+                            p_idx = idx
+                            break
+
+                    # Répartition stable et continue du flux de récolte (zéro effet pendule) :
+                    # Pions pairs (0, 2) sur l'Or (10 or/voyage)
+                    # Pions impairs (1, 3, 4) sur la Viande (10-15 viande/voyage)
+                    if castle["hp"] < castle["max_hp"] - 40 and p_idx == 0 and wood_res:
+                        # 1 pion aide aux réparations si le château est endommagé
+                        chosen_res = wood_res[0]
+                    elif bank["gold"] >= target_gold + 5 and bank["meat"] < next_meat and meat_res:
+                        # Excédent d'or et besoin urgent de viande
+                        chosen_res = meat_res[0]
+                    elif bank["meat"] >= next_meat + 10 and bank["gold"] < target_gold and gold_res:
+                        # Excédent de viande et besoin urgent d'or
+                        chosen_res = gold_res[0]
+                    elif p_idx % 2 == 0 and gold_res:
+                        chosen_res = gold_res[0]
+                    elif meat_res:
+                        chosen_res = meat_res[0]
+                    elif gold_res:
+                        chosen_res = gold_res[0]
+
+                if chosen_res:
+                    r_pos = chosen_res["pos"]
+                    res_cells = cells_within(state, (r_pos[0], r_pos[1], 1, 1), 1)
+                    if res_cells:
+                        r_field = goal_field(state, res_cells)
+                        dest = step_toward(state, u, max_move, r_field, enemy_pos, occupied)
+
+        # --- Comportement des Moines (Monk) ---
+        elif u_type == "monk":
+            # Trouver l'allié le plus blessé
+            wounded = [a for a in all_my_units if a["id"] != u_id and a.get("hp", 0) < a.get("max_hp", 0)]
+            if wounded:
+                wounded.sort(key=lambda a: a["hp"])
+                target_ally = wounded[0]
+                ally_cells = cells_within(state, (target_ally["x"], target_ally["y"], 1, 1), reach)
+                if ally_cells:
+                    f = goal_field(state, ally_cells)
+                    dest = step_toward(state, u, max_move, f, enemy_pos, occupied)
+            else:
+                # S'il n'y a pas de blessé, escorter l'armée en restant juste derrière
+                military_units = [m for m in all_my_units if m["type"] in ("warrior", "lancer", "archer")]
+                if military_units and e_castle:
+                    front_unit = min(military_units, key=lambda m: dist_to_rect((m["x"], m["y"]), e_castle))
+                    front_cells = cells_within(state, (front_unit["x"], front_unit["y"], 1, 1), 2)
+                    if front_cells:
+                        f = goal_field(state, front_cells)
+                        dest = step_toward(state, u, max_move, f, enemy_pos, occupied)
+                elif castle_deposit_field:
+                    dest = step_toward(state, u, max_move, castle_deposit_field, enemy_pos, occupied)
+
+        # --- Comportement Militaire (Warrior, Lancer, Archer) ---
+        else:
+            military_units = [m for m in all_my_units if m["type"] in ("warrior", "lancer", "archer")]
+            if macro_state in ("DEFENSE", "DEFENSE_URGENTE"):
+                # En défense : intercepter les menaces proches de notre château
+                if enemies:
+                    threats = [e for e in enemies if dist_to_rect((e["x"], e["y"]), castle) <= 12] or enemies
+                    # Chaque combattant engage la menace la plus proche de sa propre position pour couvrir le front
+                    target_e = min(threats, key=lambda e: (get_distance_chebyshev(pos, (e["x"], e["y"])), e.get("hp", 0)))
+                    e_cells = cells_within(state, (target_e["x"], target_e["y"], 1, 1), reach)
+                    if e_cells:
+                        f = goal_field(state, e_cells)
+                        dest = step_toward(state, u, max_move, f, enemy_pos, occupied)
+                elif castle_deposit_field:
+                    dest = step_toward(state, u, max_move, castle_deposit_field, enemy_pos, occupied)
+
+            elif (
+                (len(military_units) >= 4) or
+                (len(military_units) >= 3 and macro_state == "ASSAUT") or
+                (e_castle and e_castle.get("hp", 800) <= 300 and len(military_units) >= 2)
+            ):
+                # ARMÉE FORMÉE : MARCHE DE GUERRE GROUPÉE !
+                target_field = None
+                dist_to_ec = dist_to_rect(pos, e_castle) if e_castle else 99
+
+                # Sous les murs du château adverse (<= 7 cases) ou château vulnérable : siège direct
+                if e_castle and (dist_to_ec <= 7 or e_castle.get("hp", 800) <= 400):
+                    e_reach_cells = cells_within(state, e_castle, reach)
+                    target_field = goal_field(state, e_reach_cells) if e_reach_cells else e_castle_field
+                else:
+                    nearby_e = [e for e in enemies if get_distance_chebyshev(pos, (e["x"], e["y"])) <= 6]
+                    if nearby_e:
+                        # Éliminer d'abord les ennemis sur notre chemin pour sécuriser la progression
+                        target_e = sorted(nearby_e, key=lambda e: (0 if e.get("hp", 0) <= 10 else 1, e.get("hp", 0)))[0]
+                        e_cells = cells_within(state, (target_e["x"], target_e["y"], 1, 1), reach)
+                        if e_cells:
+                            target_field = goal_field(state, e_cells)
+                    elif e_castle:
+                        e_reach_cells = cells_within(state, e_castle, reach)
+                        target_field = goal_field(state, e_reach_cells) if e_reach_cells else e_castle_field
+
+                if target_field:
+                    dest = step_toward(state, u, max_move, target_field, enemy_pos, occupied)
+
+            else:  # Moins de 4 combattants : ralliement à l'avant-poste et protection de la base
+                nearby_threats = [e for e in enemies if dist_to_rect((e["x"], e["y"]), castle) <= 12]
+                if nearby_threats:
+                    target_e = sorted(nearby_threats, key=lambda e: get_distance_chebyshev(pos, (e["x"], e["y"])))[0]
+                    e_cells = cells_within(state, (target_e["x"], target_e["y"], 1, 1), reach)
+                    if e_cells:
+                        f = goal_field(state, e_cells)
+                        dest = step_toward(state, u, max_move, f, enemy_pos, occupied)
+                elif e_castle:
+                    # Ralliement en avant-poste (5 cases devant le château, face à l'ennemi)
+                    cx = castle["x"] + castle["width"] // 2
+                    cy = castle["y"] + castle["height"] // 2
+                    ecx = e_castle["x"] + e_castle["width"] // 2
+                    ecy = e_castle["y"] + e_castle["height"] // 2
+                    dx = 1 if ecx > cx else (-1 if ecx < cx else 0)
+                    dy = 1 if ecy > cy else (-1 if ecy < cy else 0)
+                    rally_x = cx + dx * 5
+                    rally_y = cy + dy * 5
+                    rally_cells = cells_within(state, (rally_x, rally_y, 1, 1), 2)
+                    if rally_cells:
+                        r_field = goal_field(state, rally_cells)
+                        dest = step_toward(state, u, max_move, r_field, enemy_pos, occupied)
+                    elif castle_deposit_field:
+                        dest = step_toward(state, u, max_move, castle_deposit_field, enemy_pos, occupied)
+
+        # Mettre à jour l'occupation des cases pour les ordres suivants
+        if dest != pos:
+            occupied.discard(pos)
+            occupied.add(dest)
+            moves.append(move_order(u_id, dest))
+
+    return moves
 
 if __name__ == "__main__":
     import random
