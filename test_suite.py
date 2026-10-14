@@ -94,7 +94,7 @@ def main():
 
             # Purple : Notre bot officiel
             bot_purple = subprocess.Popen(
-                [sys.executable, "-u", "bot.py", game_id, "--team", "purple", "--name", "AntiGravityBot", "--log-file", log_purple],
+                [sys.executable, "-u", "bots/bot1/bot.py", game_id, "--team", "purple", "--name", "AntiGravityBot", "--log-file", log_purple],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

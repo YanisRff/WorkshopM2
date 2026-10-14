@@ -126,7 +126,7 @@ def main():
 
         # Lancer le bot Purple
         bot_purple = subprocess.Popen(
-            [sys.executable, "-u", "bot.py", game_id, "--team", "purple", "--name", name_purple, "--log-file", log_purple],
+            [sys.executable, "-u", "bots/bot4/bot.py", game_id, "--team", "purple", "--name", name_purple, "--log-file", log_purple],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -135,7 +135,7 @@ def main():
 
         # Lancer le bot Yellow
         bot_yellow = subprocess.Popen(
-            [sys.executable, "-u", "bots/bot1/bot.py", game_id, "--team", "yellow", "--name", name_yellow, "--log-file", log_yellow],
+            [sys.executable, "-u", "bot.py", game_id, "--team", "yellow", "--name", name_yellow, "--log-file", log_yellow],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

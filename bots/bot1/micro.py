@@ -186,11 +186,11 @@ def generate_and_score_actions(
                     # Score de base selon le type d'ennemi
                     e_type = enemy.get("type", "pawn")
                     type_priority = {
-                        "monk": 45.0,
-                        "archer": 40.0,
+                        "monk": 40.0,
+                        "archer": 35.0,
                         "lancer": 30.0,
                         "warrior": 25.0,
-                        "pawn": 15.0,
+                        "pawn": 50.0,
                     }.get(e_type, 20.0)
 
                     # Bonus si l'attaque achève la cible (Règle d'or : éliminer une source de dégâts)
@@ -225,7 +225,7 @@ def generate_and_score_actions(
                 if dist_ec <= reach:
                     finish_castle_bonus = 200.0 if virtual_castle_hp <= 300 else 0.0
                     is_assault = multipliers.get("move_assault", 1.0) >= 2.0
-                    score_castle_atk = (80.0 + finish_castle_bonus + (120.0 if is_assault else 0.0)) * w_attack
+                    score_castle_atk = (20 + finish_castle_bonus) * w_attack
                     if score_castle_atk > best_score:
                         best_score = score_castle_atk
                         best_action = {
